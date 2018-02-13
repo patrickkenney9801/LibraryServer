@@ -44,7 +44,7 @@ app.get('/', (req, res) => {
 
 
 // Creates a new account
-app.post(path + '/users/create/:newaccount', (req, res) => {
+app.post(path + '/users/create', (req, res) => {
     console.log("Creating account...");
     var temp = req.body;
     // if the sender is not using the correct server password, send code 299 and exit
@@ -107,11 +107,11 @@ app.post(path + '/users/create/:newaccount', (req, res) => {
 });
 
 // Returns a users account information
-app.post(path + '/users/login/:credentials', (req, res) => {
+app.post(path + '/users/login', (req, res) => {
     console.log('Logging in...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
-        console.log('Invalid server password request...');
+        console.log('Invalid server password request...' + req.body.server_password);
         res.statusCode = 299;
         res.send('Incorrect server password');
         return;
@@ -126,6 +126,7 @@ app.post(path + '/users/login/:credentials', (req, res) => {
         }
         // if the account does not exist, send status code 311 and exit
         if (result[0].email_count != 1) {
+            console.log('Email does not exist...');
             res.statusCode = 311;
             res.send('Email does not exist');
             return;
@@ -140,20 +141,58 @@ app.post(path + '/users/login/:credentials', (req, res) => {
             }
             // if the password is incorrect, send status code 312 and exit
             if (result[0] == null) {
+                console.log('Invalid password...');
                 res.statusCode = 312;
                 res.send('Invalid password');
                 return;
             }
+            var temp = {
+                first_name          : result[0].first_name,
+                last_name           : result[0].last_name,
+                email               : result[0].email,
+                password            : result[0].password,
+                last_library_key    : result[0].last_library_key,
+                user_key            : result[0].user_key,
+                user_id             : result[0].user_id,
+                role                : null,
+                checkout_limit      : null,
+                user_book_count     : null
+            }
             // if the account is successfully logged in send status code 200 and the user JSON
-            console.log(result[0].email + ' logged in.');
-            res.statusCode = 200;
-            res.json(result[0]);
+            // if the user has a last library key, send the last libraries permissions too
+            if (result[0].last_library_key != null) {
+                let getpermissionssql = `SELECT * FROM library_permissions WHERE user_key = '${temp.user_key}' && library_key = '${temp.last_library_key}'`;
+                let queryPermissions = db.query(getpermissionssql, (err, result) => {
+                    if(err) {
+                        res.statusCode = 310;
+                        res.send('Unknown error logging into library serverside');
+                        throw err;
+                    }
+                    // if the library is not found, send status code 341 and exit
+                    if (result[0] == null) {
+                        res.statusCode = 339;
+                        res.send('User does not belong to this library');
+                        return;
+                    }
+                    // send back library permissions after signed in
+                    console.log(temp.email + ' logged in.');
+                    temp.role = result[0].role;
+                    temp.checkout_limit = result[0].checkout_limit;
+                    temp.user_book_count = result[0].user_book_count;
+                    res.statusCode = 200;
+                    res.json(temp);
+                });
+            } else {
+                console.log(result[0].email + ' logged in.');
+                res.statusCode = 200;
+                res.json(result[0]);
+            }
         });
     });
 });
 
 // Returns all users
-app.post(path + '/users/getusers/:serverpassword', (req, res) => {
+app.post(path + '/users/getusers', (req, res) => {
     console.log('Getting users...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -234,7 +273,7 @@ app.post(path + '/users/getlibraryuserbooks/:serverpassword', (req, res) => {
 
 
 // Creates a new library
-app.post(path + '/libraries/create/:newlibrary', (req, res) => {
+app.post(path + '/libraries/create', (req, res) => {
     console.log('Creating library...');
     var temp = req.body;
     // if the sender is not using the correct server password, send code 299 and exit
@@ -287,14 +326,15 @@ app.post(path + '/libraries/create/:newlibrary', (req, res) => {
             newlibrary.library_key = result[0].UUID;
             newlibrarypermission.library_key = newlibrary.library_key;
             // if the name is not in use, add the library to the server and attach creator permissions
-            let sqlpermissions = `INSERT INTO librarie_permissions SET ?`;
+            let sqlpermissions = `INSERT INTO library_permissions SET ?`;
             let query = db.query(sqlpermissions, newlibrarypermission, (err, result) => {
                 if(err) {
                     res.statusCode = 310;
                     res.send('Unknown error creating library serverside');
                     throw err;
                 }
-                let sql = `INSERT INTO libraries SET ?`;
+                let sql = `INSERT INTO libraries SET ?;` +
+                          `UPDATE users SET last_library_key = '${newlibrary.library_key}' WHERE user_key = '${req.body.user_key}'`;
                 let query2 = db.query(sql, newlibrary, (err, result) => {
                     if(err) {
                         res.statusCode = 310;
@@ -313,10 +353,10 @@ app.post(path + '/libraries/create/:newlibrary', (req, res) => {
 });
 
 // Returns a all libraries
-app.post(path + '/libraries/getlibraries/:serverpassword', (req, res) => {
+app.post(path + '/libraries/getlibraries', (req, res) => {
     console.log('Getting libraries...');
     // if the sender is not using the correct server password, send code 299 and exit
-    if (req.params.serverpassword != server_password) {
+    if (req.body.server_password != server_password) {
         console.log('Invalid server password request...');
         res.statusCode = 299;
         res.send('Incorrect server password');
@@ -338,7 +378,7 @@ app.post(path + '/libraries/getlibraries/:serverpassword', (req, res) => {
 });
 
 // Returns a specified library
-app.post(path + '/libraries/getlibrary/:librarykey', (req, res) => {
+app.post(path + '/libraries/getlibrary', (req, res) => {
     console.log('Getting library...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -370,7 +410,7 @@ app.post(path + '/libraries/getlibrary/:librarykey', (req, res) => {
 
 // Logs user into a specified library given user and library key and server password
 // This is only used for accounts already belonging to the library
-app.post(path + '/libraries/logintolibrary/:logincredentials', (req, res) => {
+app.post(path + '/libraries/logintolibrary', (req, res) => {
     console.log('Logging into library...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -379,7 +419,7 @@ app.post(path + '/libraries/logintolibrary/:logincredentials', (req, res) => {
         res.send('Incorrect server password');
         return;
     }
-    let getPermissionssql = `SELECT * FROM library_permissions WHERE user_key = '${req.body.user_key}' && library_key = '${req.body.library_key}'`;
+    let getpermissionssql = `SELECT * FROM library_permissions WHERE user_key = '${req.body.user_key}' && library_key = '${req.body.library_key}'`;
     let query = db.query(getpermissionssql, (err, result) => {
         if(err) {
             res.statusCode = 310;
@@ -392,17 +432,26 @@ app.post(path + '/libraries/logintolibrary/:logincredentials', (req, res) => {
             res.send('User does not belong to this library');
             return;
         }
-        // send back library permissions after signed in
         var library_permissions = result[0];
-        res.statusCode = 200;
-        res.json(library_permissions);
-        console.log('Library logged into as ' + library_permissions.role + '.');
+        // update users's last library
+        let lastlibrarysql = `UPDATE users SET last_library_key = '${req.body.library_key}' WHERE user_key = '${req.body.user_key}'`;
+        let updatequery = db.query(lastlibrarysql, (err, result) => {
+            if(err) {
+                res.statusCode = 310;
+                res.send('Unknown error logging into library serverside');
+                throw err;
+            }
+            // send back library permissions after signed in
+            res.statusCode = 200;
+            res.json(library_permissions);
+            console.log('Library logged into as ' + library_permissions.role + '.');
+        });
     });
 });
 
 // Sign user into a specified library given user information, password required on first access
 // Login credentials must require the server_password, library_key and the user_key and general password of the library
-app.post(path + '/libraries/signintolibrarygeneral/:logincredentials', (req, res) => {
+app.post(path + '/libraries/signintolibrarygeneral', (req, res) => {
     console.log('Getting library...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -419,57 +468,79 @@ app.post(path + '/libraries/signintolibrarygeneral/:logincredentials', (req, res
             res.send('Unknown error signing into library serverside');
             throw err;
         }
+        var success = false;
         // if the library permission is found, send status code 200 and the permission JSON
         if (result[0] != null) {
-            // send back the library after the user is logged in
             var library_permissions = result[0];
-            res.statusCode = 200;
-            res.json(library_permissions);
-            console.log('Library logged into as ' + library_permissions.role + '.');
-            return;
-        }
-        // if the user does not already belong to the library, attempt to sign them in
-
-        // query server for the specified library
-        let sqllibrary = `SELECT * FROM libraries WHERE library_key = '${req.body.library_key}' && general_password = '${req.body.general_password}'`;
-        let query2 = db.query(sqllibrary, (err, result) => {
-            if(err) {
-                res.statusCode = 310;
-                res.send('Unknown error logging into library serverside');
-                throw err;
-            }
-            // if the library is not found, send status code 341 and exit
-            if (result[0] == null) {
-                res.statusCode = 341;
-                res.send('Invalid library password');
-                return;
-            }
-            // if the correct password was found, add library permissions for the user to server and return permissions
-            var library_permissions = {
-                user_key        : req.body.user_key,
-                library_key     : req.body.library_key,
-                role            : 'G',
-                checkout_limit  : result[0].general_checkout_limit,
-                user_book_count : 0
-            }
-            let sqladdpermissions = `INSERT INTO library_permissions SET ?`
-            let query3 = db.query(sqladdpermissions, library_permissions, (err, result) => {
+            success = true;
+            // update users's last library
+            let lastlibrarysql = `UPDATE users SET last_library_key = '${req.body.library_key}' WHERE user_key = '${req.body.user_key}'`;
+            let updatequery = db.query(lastlibrarysql, (err, result) => {
                 if(err) {
                     res.statusCode = 310;
-                    res.send('Unknown error adding permissions serverside');
+                    res.send('Unknown error logging into library serverside');
                     throw err;
                 }
+                // send back library permissions after signed in
                 res.statusCode = 200;
                 res.json(library_permissions);
                 console.log('Library logged into as ' + library_permissions.role + '.');
+                return;
             });
-        });
+        }
+        // if the user does not already belong to the library, attempt to sign them in
+        if (!success) {
+            // query server for the specified library
+            let sqllibrary = `SELECT * FROM libraries WHERE library_key = '${req.body.library_key}' && general_password = '${req.body.general_password}'`;
+            let query2 = db.query(sqllibrary, (err, result) => {
+                if(err) {
+                    res.statusCode = 310;
+                    res.send('Unknown error logging into library serverside');
+                    throw err;
+                }
+                // if the library is not found, send status code 341 and exit
+                if (result[0] == null) {
+                    res.statusCode = 341;
+                    res.send('Invalid library password');
+                    return;
+                }
+                // if the correct password was found, add library permissions for the user to server and return permissions
+                var library_permissions = {
+                    user_key        : req.body.user_key,
+                    library_key     : req.body.library_key,
+                    role            : 'G',
+                    checkout_limit  : result[0].general_checkout_limit,
+                    user_book_count : 0
+                }
+                let sqladdpermissions = `INSERT INTO library_permissions SET ?`
+                let query3 = db.query(sqladdpermissions, library_permissions, (err, result) => {
+                    if(err) {
+                        res.statusCode = 310;
+                        res.send('Unknown error adding permissions serverside');
+                        throw err;
+                    }
+                    // update users's last library
+                    let lastlibrarysql = `UPDATE users SET last_library_key = '${req.body.library_key}' WHERE user_key = '${req.body.user_key}'`;
+                    let updatequery = db.query(lastlibrarysql, (err, result) => {
+                        if(err) {
+                            res.statusCode = 310;
+                            res.send('Unknown error logging into library serverside');
+                            throw err;
+                        }
+                        // send back library permissions after signed in
+                        res.statusCode = 200;
+                        res.json(library_permissions);
+                        console.log('Library logged into as ' + library_permissions.role + '.');
+                    });
+                });
+            });
+        }
     });
 });
 
 // Sign user into a specified library given user information, password required on first access
 // Login credentials must require the server_password, library_key and the user_key and teacher password of the library
-app.post(path + '/libraries/signintolibraryteacher/:logincredentials', (req, res) => {
+app.post(path + '/libraries/signintolibraryteacher', (req, res) => {
     console.log('Getting library...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -488,76 +559,110 @@ app.post(path + '/libraries/signintolibraryteacher/:logincredentials', (req, res
         }
         var permissions_exist = false;
         var library_permissions = null;
+        var success = false;
         // if the library permission is found, check to see if the permission is greater than or equal to teacher
         if (result[0] != null) {
             // send back the library after the user is logged in
             library_permissions = result[0];
             if (library_permissions.role != 'G') {
-                res.statusCode = 200;
-                res.json(library_permissions);
-                console.log('Library logged into as ' + library_permissions.role + '.');
-                return;
+                success = true;
+                // update users's last library
+                let lastlibrarysql = `UPDATE users SET last_library_key = '${req.body.library_key}' WHERE user_key = '${req.body.user_key}'`;
+                let updatequery = db.query(lastlibrarysql, (err, result) => {
+                    if(err) {
+                        res.statusCode = 310;
+                        res.send('Unknown error logging into library serverside');
+                        throw err;
+                    }
+                    // send back library permissions after signed in
+                    res.statusCode = 200;
+                    res.json(library_permissions);
+                    console.log('Library logged into as ' + library_permissions.role + '.');
+                    return;
+                });
             }
             permissions_exist = true;
         }
         // if the user does not already belong to the library, attempt to sign them in
-
-        // query server for the specified library
-        let sqllibrary = `SELECT * FROM libraries WHERE library_key = '${req.body.library_key}' && teacher_password = '${req.body.teacher_password}'`;
-        let query2 = db.query(sqllibrary, (err, result) => {
-            if(err) {
-                res.statusCode = 310;
-                res.send('Unknown error logging into library serverside');
-                throw err;
-            }
-            // if the library is not found, send status code 341 and exit
-            if (result[0] == null) {
-                res.statusCode = 341;
-                res.send('Invalid library password');
-                return;
-            }
-            // if the correct password was found, add library permissions for the user to server and return permissions if permissions do not already exist
-            if (!permissions_exist) {
-                library_permissions = {
-                    user_key        : req.body.user_key,
-                    library_key     : req.body.library_key,
-                    role            : 'T',
-                    checkout_limit  : 1000,
-                    user_book_count : 0
+        if (!success) {
+            // query server for the specified library
+            let sqllibrary = `SELECT * FROM libraries WHERE library_key = '${req.body.library_key}' && teacher_password = '${req.body.teacher_password}'`;
+            let query2 = db.query(sqllibrary, (err, result) => {
+                if(err) {
+                    res.statusCode = 310;
+                    res.send('Unknown error logging into library serverside');
+                    throw err;
                 }
-                let sqladdpermissions = `INSERT INTO library_permissions SET ?`;
-                let query3 = db.query(sqladdpermissions, (err, result) => {
-                    if(err) {
-                        res.statusCode = 310;
-                        res.send('Unknown error adding permissions serverside');
-                        throw err;
+                // if the library is not found, send status code 341 and exit
+                if (result[0] == null) {
+                    res.statusCode = 341;
+                    res.send('Invalid library password');
+                    return;
+                }
+                // if the correct password was found, add library permissions for the user to server and return permissions if permissions do not already exist
+                if (!permissions_exist) {
+                    library_permissions = {
+                        user_key        : req.body.user_key,
+                        library_key     : req.body.library_key,
+                        role            : 'T',
+                        checkout_limit  : 1000,
+                        user_book_count : 0
                     }
-                    res.statusCode = 200;
-                    res.json(library_permissions);
-                    console.log('Library logged into as ' + library_permissions.role + '.');
-                });
-            }
-            else {
-                library_permissions.role = 'T';
-                let sqlupdatepermissions = `UPDATE library_permissions SET role = 'T' WHERE library_key = '${req.body.library_key}' && user_key = '${req.body.user_key}'`;
-                let query3 = db.query(sqlupdatepermissions, (err, result) => {
-                    if(err) {
-                        res.statusCode = 310;
-                        res.send('Unknown error updating permissions serverside');
-                        throw err;
-                    }
-                    res.statusCode = 200;
-                    res.json(library_permissions);
-                    console.log('Library logged into as ' + library_permissions.role + '.');
-                });
-            }
-        });
+                    let sqladdpermissions = `INSERT INTO library_permissions SET ?`;
+                    let query3 = db.query(sqladdpermissions, library_permissions, (err, result) => {
+                        if(err) {
+                            res.statusCode = 310;
+                            res.send('Unknown error adding permissions serverside');
+                            throw err;
+                        }
+                        // update users's last library
+                        let lastlibrarysql = `UPDATE users SET last_library_key = '${req.body.library_key}' WHERE user_key = '${req.body.user_key}'`;
+                        let updatequery = db.query(lastlibrarysql, (err, result) => {
+                            if(err) {
+                                res.statusCode = 310;
+                                res.send('Unknown error logging into library serverside');
+                                throw err;
+                            }
+                            // send back library permissions after signed in
+                            res.statusCode = 200;
+                            res.json(library_permissions);
+                            console.log('Library logged into as ' + library_permissions.role + '.');
+                        });
+                    });
+                }
+                else {
+                    library_permissions.role = 'T';
+                    let sqlupdatepermissions = `UPDATE library_permissions SET role = 'T' WHERE library_key = '${req.body.library_key}' && user_key = '${req.body.user_key}';` +
+                                            `UPDATE library_permissions SET checkout_limit = 1000 WHERE library_key = '${req.body.library_key}' && user_key = '${req.body.user_key}';`;
+                    let query3 = db.query(sqlupdatepermissions, (err, result) => {
+                        if(err) {
+                            res.statusCode = 310;
+                            res.send('Unknown error updating permissions serverside');
+                            throw err;
+                        }
+                        // update users's last library
+                        let lastlibrarysql = `UPDATE users SET last_library_key = '${req.body.library_key}' WHERE user_key = '${req.body.user_key}'`;
+                        let updatequery = db.query(lastlibrarysql, (err, result) => {
+                            if(err) {
+                                res.statusCode = 310;
+                                res.send('Unknown error logging into library serverside');
+                                throw err;
+                            }
+                            // send back library permissions after signed in
+                            res.statusCode = 200;
+                            res.json(library_permissions);
+                            console.log('Library logged into as ' + library_permissions.role + '.');
+                        });
+                    });
+                }
+            });
+        }
     });
 });
 
 // Sign user into a specified library given user information, password required on first access
 // Login credentials must require the server_password, library_key and the user_key and librarian password of the library
-app.post(path + '/libraries/signintolibrarylibrarian/:logincredentials', (req, res) => {
+app.post(path + '/libraries/signintolibrarylibrarian', (req, res) => {
     console.log('Getting library...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -575,76 +680,110 @@ app.post(path + '/libraries/signintolibrarylibrarian/:logincredentials', (req, r
             throw err;
         }
         var permissions_exist = false;
+        var success = false;
         var library_permissions = null;
         // if the library permission is found, check to see if the permission is greater than or equal to librarian
         if (result[0] != null) {
             // send back the library after the user is logged in
             library_permissions = result[0];
             if (library_permissions.role != 'G' && library_permissions.role != 'T') {
-                res.statusCode = 200;
-                res.json(library_permissions);
-                console.log('Library logged into as ' + library_permissions.role + '.');
-                return;
+                success = true;
+                // update users's last library
+                let lastlibrarysql = `UPDATE users SET last_library_key = '${req.body.library_key}' WHERE user_key = '${req.body.user_key}'`;
+                let updatequery = db.query(lastlibrarysql, (err, result) => {
+                    if(err) {
+                        res.statusCode = 310;
+                        res.send('Unknown error logging into library serverside');
+                        throw err;
+                    }
+                    // send back library permissions after signed in
+                    res.statusCode = 200;
+                    res.json(library_permissions);
+                    console.log('Library logged into as ' + library_permissions.role + '.');
+                    return;
+                });
             }
             permissions_exist = true;
         }
         // if the user does not already belong to the library, attempt to sign them in
-
-        // query server for the specified library
-        let sqllibrary = `SELECT * FROM libraries WHERE library_key = '${req.body.library_key}' && librarian_password = '${req.body.librarian_password}'`;
-        let query2 = db.query(sqllibrary, (err, result) => {
-            if(err) {
-                res.statusCode = 310;
-                res.send('Unknown error logging into library serverside');
-                throw err;
-            }
-            // if the library is not found, send status code 341 and exit
-            if (result[0] == null) {
-                res.statusCode = 341;
-                res.send('Invalid library password');
-                return;
-            }
-            // if the correct password was found, add library permissions for the user to server and return permissions if permissions do not already exist
-            if (!permissions_exist) {
-                library_permissions = {
-                    user_key        : req.body.user_key,
-                    library_key     : req.body.library_key,
-                    role            : 'L',
-                    checkout_limit  : 1000,
-                    user_book_count : 0
+        if (!success) {
+            // query server for the specified library
+            let sqllibrary = `SELECT * FROM libraries WHERE library_key = '${req.body.library_key}' && librarian_password = '${req.body.librarian_password}'`;
+            let query2 = db.query(sqllibrary, (err, result) => {
+                if(err) {
+                    res.statusCode = 310;
+                    res.send('Unknown error logging into library serverside');
+                    throw err;
                 }
-                let sqladdpermissions = `INSERT INTO library_permissions SET ?`;
-                let query3 = db.query(sqladdpermissions, (err, result) => {
-                    if(err) {
-                        res.statusCode = 310;
-                        res.send('Unknown error adding permissions serverside');
-                        throw err;
+                // if the library is not found, send status code 341 and exit
+                if (result[0] == null) {
+                    res.statusCode = 341;
+                    res.send('Invalid library password');
+                    return;
+                }
+                // if the correct password was found, add library permissions for the user to server and return permissions if permissions do not already exist
+                if (!permissions_exist) {
+                    library_permissions = {
+                        user_key        : req.body.user_key,
+                        library_key     : req.body.library_key,
+                        role            : 'L',
+                        checkout_limit  : 1000,
+                        user_book_count : 0
                     }
-                    res.statusCode = 200;
-                    res.json(library_permissions);
-                    console.log('Library logged into as ' + library_permissions.role + '.');
-                });
-            }
-            else {
-                library_permissions.role = 'L';
-                let sqlupdatepermissions = `UPDATE library_permissions SET role = 'L' WHERE library_key = '${req.body.library_key}' && user_key = '${req.body.user_key}'`;
-                let query3 = db.query(sqlupdatepermissions, (err, result) => {
-                    if(err) {
-                        res.statusCode = 310;
-                        res.send('Unknown error updating permissions serverside');
-                        throw err;
-                    }
-                    res.statusCode = 200;
-                    res.json(library_permissions);
-                    console.log('Library logged into as ' + library_permissions.role + '.');
-                });
-            }
-        });
+                    let sqladdpermissions = `INSERT INTO library_permissions SET ?`;
+                    let query3 = db.query(sqladdpermissions, library_permissions, (err, result) => {
+                        if(err) {
+                            res.statusCode = 310;
+                            res.send('Unknown error adding permissions serverside');
+                            throw err;
+                        }
+                        // update users's last library
+                        let lastlibrarysql = `UPDATE users SET last_library_key = '${req.body.library_key}' WHERE user_key = '${req.body.user_key}'`;
+                        let updatequery = db.query(lastlibrarysql, (err, result) => {
+                            if(err) {
+                                res.statusCode = 310;
+                                res.send('Unknown error logging into library serverside');
+                                throw err;
+                            }
+                            // send back library permissions after signed in
+                            res.statusCode = 200;
+                            res.json(library_permissions);
+                            console.log('Library logged into as ' + library_permissions.role + '.');
+                        });
+                    });
+                }
+                else {
+                    library_permissions.role = 'L';
+                    let sqlupdatepermissions = `UPDATE library_permissions SET role = 'L' WHERE library_key = '${req.body.library_key}' && user_key = '${req.body.user_key}';` + 
+                                            `UPDATE library_permissions SET checkout_limit = 1000 WHERE library_key = '${req.body.library_key}' && user_key = '${req.body.user_key}';`;
+                    let query3 = db.query(sqlupdatepermissions, (err, result) => {
+                        if(err) {
+                            res.statusCode = 310;
+                            res.send('Unknown error updating permissions serverside');
+                            throw err;
+                        }
+                        // update users's last library
+                        let lastlibrarysql = `UPDATE users SET last_library_key = '${req.body.library_key}' WHERE user_key = '${req.body.user_key}'`;
+                        let updatequery = db.query(lastlibrarysql, (err, result) => {
+                            if(err) {
+                                res.statusCode = 310;
+                                res.send('Unknown error logging into library serverside');
+                                throw err;
+                            }
+                            // send back library permissions after signed in
+                            res.statusCode = 200;
+                            res.json(library_permissions);
+                            console.log('Library logged into as ' + library_permissions.role + '.');
+                        });
+                    });
+                }
+            });
+        }
     });
 });
 
 // get all reserved books from a library
-app.post(path + '/libraries/getreservedbooks/:librarykey', (req, res) => {
+app.post(path + '/libraries/getreservedbooks', (req, res) => {
     console.log('Getting reserved books...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -669,7 +808,7 @@ app.post(path + '/libraries/getreservedbooks/:librarykey', (req, res) => {
 });
 
 // get all checked out books from a library
-app.post(path + '/libraries/getcheckedoutbooks/:librarykey', (req, res) => {
+app.post(path + '/libraries/getcheckedoutbooks', (req, res) => {
     console.log('Getting checked out books...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -694,7 +833,7 @@ app.post(path + '/libraries/getcheckedoutbooks/:librarykey', (req, res) => {
 });
 
 // get all books from a library
-app.post(path + '/libraries/getbooks/:librarykey', (req, res) => {
+app.post(path + '/libraries/getbooks', (req, res) => {
     console.log('Getting books...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -725,7 +864,7 @@ app.post(path + '/libraries/getbooks/:librarykey', (req, res) => {
 
 
 // Creates a new book
-app.post(path + '/books/create/:newbook', (req, res) => {
+app.post(path + '/books/create', (req, res) => {
     console.log('Creating book...');
     var temp = req.body;
     // if the sender is not using the correct server password, send code 299 and exit
