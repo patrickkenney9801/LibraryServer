@@ -156,11 +156,13 @@ app.post(path + '/users/login', (req, res) => {
                 user_id             : result[0].user_id,
                 role                : null,
                 checkout_limit      : null,
-                user_book_count     : null
+                user_book_count     : null,
+                last_library_name   : null
             }
             // if the account is successfully logged in send status code 200 and the user JSON
-            // if the user has a last library key, send the last libraries permissions too
+            // if the user has a last library key, send the last library's permissions and library
             if (result[0].last_library_key != null) {
+                // get permissions
                 let getpermissionssql = `SELECT * FROM library_permissions WHERE user_key = '${temp.user_key}' && library_key = '${temp.last_library_key}'`;
                 let queryPermissions = db.query(getpermissionssql, (err, result) => {
                     if(err) {
@@ -174,13 +176,29 @@ app.post(path + '/users/login', (req, res) => {
                         res.send('User does not belong to this library');
                         return;
                     }
-                    // send back library permissions after signed in
-                    console.log(temp.email + ' logged in.');
                     temp.role = result[0].role;
                     temp.checkout_limit = result[0].checkout_limit;
                     temp.user_book_count = result[0].user_book_count;
-                    res.statusCode = 200;
-                    res.json(temp);
+                    // get library name
+                    let getlibrarysql = `SELECT * FROM libraries WHERE library_key = '${temp.last_library_key}'`;
+                    let queryLibraries = db.query(getlibrarysql, (err, result) => {
+                        if(err) {
+                            res.statusCode = 310;
+                            res.send('Unknown error logging into library serverside');
+                            throw err;
+                        }
+                        // if the library is not found, send status code 341 and exit
+                        if (result[0] == null) {
+                            res.statusCode = 339;
+                            res.send('Library does not exist');
+                            return;
+                        }
+                        // send back library permissions after signed in
+                        console.log(temp.email + ' logged in.');
+                        temp.last_library_name = result[0].name;
+                        res.statusCode = 200;
+                        res.json(temp);
+                    });
                 });
             } else {
                 console.log(result[0].email + ' logged in.');
@@ -217,7 +235,7 @@ app.post(path + '/users/getusers', (req, res) => {
 });
 
 // Returns all books checked out and reserved by user, requires user key and server password
-app.post(path + '/users/getuserbooks/:serverpassword', (req, res) => {
+app.post(path + '/users/getuserbooks', (req, res) => {
     console.log('Getting users...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -242,7 +260,7 @@ app.post(path + '/users/getuserbooks/:serverpassword', (req, res) => {
 });
 
 // Returns all books checked out and reserved by user from a library, requires user key and library key and server password
-app.post(path + '/users/getlibraryuserbooks/:serverpassword', (req, res) => {
+app.post(path + '/users/getlibraryuserbooks', (req, res) => {
     console.log('Getting users...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -911,7 +929,7 @@ app.post(path + '/books/create', (req, res) => {
 });
 
 // reserve a book, requires server password, user key, book key, library key
-app.post(path + '/books/reservebook/:reservecredentials', (req, res) => {
+app.post(path + '/books/reservebook', (req, res) => {
     console.log('Reserving book...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -945,7 +963,7 @@ app.post(path + '/books/reservebook/:reservecredentials', (req, res) => {
         // reserve the book for the user
         let sqlupdatebook = `UPDATE books SET user_key = '${req.body.user_key}' WHERE book_key = '${req.body.book_key}';` +
                             `UPDATE books SET reserved = TRUE WHERE book_key = '${req.body.book_key}';` +
-                            `UPDATE books SET date_reserved = NOW() WHERE book_key = '${req.body.book_key}';` +
+                            `UPDATE books SET date_reserved = CURDATE() WHERE book_key = '${req.body.book_key}';` +
                             `UPDATE library_permissions SET user_book_count = user_book_count + 1 WHERE user_key = '${req.body.user_key}' && library_key = '${req.body.library_key}';`;
         let queryupdatebook = db.query(sqlupdatebook, (err, result) => {
             if(err) {
@@ -962,7 +980,7 @@ app.post(path + '/books/reservebook/:reservecredentials', (req, res) => {
 });
 
 // unreserve a book, requires server password, user key, book key, library key
-app.post(path + '/books/unreservebook/:reservecredentials', (req, res) => {
+app.post(path + '/books/unreservebook', (req, res) => {
     console.log('Unreserving book...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -991,7 +1009,7 @@ app.post(path + '/books/unreservebook/:reservecredentials', (req, res) => {
 
 // check out a book, requires server password, book key
 // this can only be called by librarians and creators in a library
-app.post(path + '/books/checkoutbook/:checkoutcredentials', (req, res) => {
+app.post(path + '/books/checkoutbook', (req, res) => {
     console.log('Checking out book...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -1020,7 +1038,7 @@ app.post(path + '/books/checkoutbook/:checkoutcredentials', (req, res) => {
         let sqlupdatebook = `UPDATE books SET reserved = FALSE WHERE book_key = '${req.body.book_key}';` +
                             `UPDATE books SET date_reserved = NULL WHERE book_key = '${req.body.book_key}';` +
                             `UPDATE books SET checked_out = TRUE WHERE book_key = '${req.body.book_key}';` +
-                            `UPDATE books SET date_checked_out = NOW() WHERE book_key = '${req.body.book_key}';`;
+                            `UPDATE books SET date_checked_out = CURDATE() WHERE book_key = '${req.body.book_key}';`;
         let queryupdatebook = db.query(sqlupdatebook, (err, result) => {
             if(err) {
                 res.statusCode = 310;
@@ -1036,7 +1054,7 @@ app.post(path + '/books/checkoutbook/:checkoutcredentials', (req, res) => {
 });
 
 // return a book, requires server password, user key, book key, library key
-app.post(path + '/books/returnbook/:returncredentials', (req, res) => {
+app.post(path + '/books/returnbook', (req, res) => {
     console.log('Returning book...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
@@ -1064,7 +1082,7 @@ app.post(path + '/books/returnbook/:returncredentials', (req, res) => {
 });
 
 // get all books
-app.post(path + '/books/getallbooks/:serverinfo', (req, res) => {
+app.post(path + '/books/getallbooks', (req, res) => {
     console.log('Getting books...');
     // if the sender is not using the correct server password, send code 299 and exit
     if (req.body.server_password != server_password) {
