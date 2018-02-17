@@ -157,6 +157,7 @@ app.post(path + '/users/login', (req, res) => {
                 role                : null,
                 checkout_limit      : null,
                 user_book_count     : null,
+                library_map         : null,
                 last_library_name   : null
             }
             // if the account is successfully logged in send status code 200 and the user JSON
@@ -179,7 +180,7 @@ app.post(path + '/users/login', (req, res) => {
                     temp.role = result[0].role;
                     temp.checkout_limit = result[0].checkout_limit;
                     temp.user_book_count = result[0].user_book_count;
-                    // get library name
+                    // get library name and map
                     let getlibrarysql = `SELECT * FROM libraries WHERE library_key = '${temp.last_library_key}'`;
                     let queryLibraries = db.query(getlibrarysql, (err, result) => {
                         if(err) {
@@ -196,6 +197,7 @@ app.post(path + '/users/login', (req, res) => {
                         // send back library permissions after signed in
                         console.log(temp.email + ' logged in.');
                         temp.last_library_name = result[0].name;
+                        temp.library_map = result[0].library_map;
                         res.statusCode = 200;
                         res.json(temp);
                     });
@@ -308,6 +310,9 @@ app.post(path + '/libraries/create', (req, res) => {
         teacher_password        : temp.teacher_password,
         general_password        : temp.general_password,
         general_checkout_limit  : temp.general_checkout_limit,
+        library_map             : temp.library_map,
+        lend_days               : temp.lend_days,
+        daily_late_fee          : temp.late_fee,
         library_key             : '',
         library_id              : null
     };
